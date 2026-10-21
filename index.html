@@ -80,7 +80,6 @@
              border-radius: 6px; padding: 8px; font-size: 16px; font-family: inherit; }
   button.small { background: #222c3c; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
   button.small.primary { background: var(--accent); color: #042; border-color: var(--accent); font-weight: 700; }
-  button.small.rec { background: var(--red); border-color: var(--red); color: #fff; }
   .list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
   .item { background: var(--panel); border-radius: 8px; padding: 9px 10px; }
   .item .head { display: flex; gap: 8px; align-items: center; }
@@ -144,9 +143,7 @@
         <textarea id="edText" placeholder="例：「楽を」が「なくを」に聞こえる"></textarea>
         <div class="row" style="margin-top:8px">
           <button class="small primary" id="saveBtn">追加（Ctrl+Enter）</button>
-          <button class="small" id="micBtn">🎤 声で入力</button>
           <button class="small" id="cancelBtn">やめる</button>
-          <span class="hint" id="micMsg"></span>
         </div>
       </div>
       <div class="list" id="list"></div>
@@ -325,7 +322,7 @@
     $("edQuote").textContent = "「" + l.text + "」";
     $("editor").classList.add("on"); $("edText").value = ""; $("edText").focus();
   }
-  function closeEditor() { $("editor").classList.remove("on"); stopMic(); }
+  function closeEditor() { $("editor").classList.remove("on"); }
   function addComment() {
     const text = $("edText").value.trim();
     if (!text) { toast("コメントが空です"); return; }
@@ -337,21 +334,6 @@
   $("saveBtn").onclick = addComment;
   $("cancelBtn").onclick = closeEditor;
   $("edText").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) addComment(); });
-
-  // 声で入力（Chrome の音声認識。使えない環境では fn 2回の Mac 音声入力を案内）
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null;
-  function stopMic() { if (rec) { rec.stop(); rec = null; } $("micBtn").classList.remove("rec"); $("micBtn").textContent = "🎤 声で入力"; }
-  $("micBtn").onclick = () => {
-    if (rec) { stopMic(); return; }
-    if (!SR) { $("micMsg").textContent = "このブラウザでは使えません。fn キーを2回押して話してください"; $("edText").focus(); return; }
-    rec = new SR(); rec.lang = "ja-JP"; rec.interimResults = true; rec.continuous = true;
-    const base = $("edText").value;
-    rec.onresult = e => { let s = ""; for (const r of e.results) s += r[0].transcript; $("edText").value = base + s; };
-    rec.onerror = e => { $("micMsg").textContent = `音声入力が使えません（${e.error}）。fn キーを2回押して話してください`; stopMic(); };
-    rec.onend = () => stopMic();
-    rec.start(); $("micBtn").classList.add("rec"); $("micBtn").textContent = "■ 話し終わったら押す"; $("micMsg").textContent = "";
-  };
 
   function render() {
     const list = $("list"); list.innerHTML = "";
