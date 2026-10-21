@@ -1,0 +1,410 @@
+<!doctype html>
+<!-- 音声チェック（この1ファイルで動く）。
+     同じフォルダに script.txt（台本）と audio.mp3（音声）を置いて開くと、自動で読み込む。
+     読み込めないとき（ダブルクリックで開いた場合など）は、画面からファイルを選ぶ／ドラッグする。
+
+     script.txt の書き方：
+       # タイトル            ← 1行目が # ならタイトル（なくてもよい）
+       0:00.3 1つ目の文       ← 1行に1文。頭の秒（分:秒）はなくてもよい
+       0:03.3 2つ目の文
+                              ← 空行で段落を区切る
+       0:08.9 3つ目の文
+     秒がない文は、文字数から目安の位置を出す -->
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>音声チェック</title>
+<style>
+  :root { --bg: #0e1420; --panel: #161e2c; --line: #263246; --text: #e8edf5; --sub: #8d9bb0; --accent: #3ccfc0; --gold: #f2b631; --red: #ff5a5a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 520px); gap: 20px; padding: 0 20px; }
+
+  /* 左：台本 */
+  .script { padding: 20px 0 50vh; }
+  .script h1 { font-size: 16px; font-weight: 600; margin: 0 0 16px; color: var(--sub); }
+  .para { margin: 0 0 28px; }
+  .sent { display: flex; gap: 12px; font-size: 24px; line-height: 1.6; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+          border-left: 4px solid transparent; }
+  .sent:hover { background: #172235; }
+  .sent .no { font-size: 13px; color: var(--sub); min-width: 26px; padding-top: 9px; font-variant-numeric: tabular-nums; }
+  .sent .tx { white-space: pre-wrap; }
+  .sent.cur { background: #1b2c40; border-left-color: var(--gold); }
+  .sent.has { border-left-color: var(--red); }
+  .sent.has.cur { border-left-color: var(--gold); }
+  .sent .badge { font-size: 12px; color: var(--red); padding-top: 10px; white-space: nowrap; }
+
+  /* 読み込み欄 */
+  .loader { display: none; border: 2px dashed var(--line); border-radius: 12px; padding: 24px; font-size: 15px; line-height: 1.8; }
+  .loader.on { display: block; }
+  .loader.drag { border-color: var(--accent); background: #12202c; }
+  .loader label { display: inline-block; margin: 6px 8px 0 0; }
+  .loader input { font-size: 14px; color: var(--sub); }
+  .loader .ok { color: #7fc98f; }
+
+  /* 右：プレーヤーとコメント（スクロールしても右は残る） */
+  .side { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 20px 0; }
+  .player { background: var(--panel); border-radius: 12px; padding: 14px 16px; }
+  .player .st { font-size: 12px; color: #7fc98f; min-height: 16px; }
+  .player .st.ng { color: var(--red); }
+  .btns { display: flex; gap: 10px; align-items: center; margin: 8px 0 12px; }
+  .pbtn { background: #f4f6f8; color: #111; border: 0; border-radius: 8px; padding: 12px 20px; font-size: 17px; font-weight: 700; cursor: pointer; }
+  .pbtn.on { background: var(--gold); }
+  .now { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; margin-left: auto; }
+  #seek { position: relative; height: 28px; cursor: pointer; user-select: none; touch-action: none; }
+  #seek .track { position: absolute; left: 0; right: 0; top: 12px; height: 4px; background: #3a4558; border-radius: 2px; }
+  #seek .fill { position: absolute; left: 0; top: 12px; height: 4px; background: var(--gold); border-radius: 2px; }
+  #seek .knob { position: absolute; top: 5px; width: 18px; height: 18px; margin-left: -9px; background: var(--gold); border-radius: 50%; }
+  #seek .mark { position: absolute; top: -2px; width: 10px; height: 10px; margin-left: -5px; background: var(--red);
+                border-radius: 50%; border: 2px solid var(--panel); }
+  #seek .mark.done { background: #556; }
+  .ctrl { display: flex; gap: 6px; align-items: center; margin-top: 10px; flex-wrap: wrap; font-size: 13px; color: var(--sub); }
+  .ctrl button { background: #1d2635; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+                 font-size: 13px; cursor: pointer; }
+  .ctrl button.on { border-color: var(--gold); color: var(--gold); }
+
+  .comment { margin-top: 14px; border: 3px solid var(--accent); border-radius: 12px; padding: 14px;
+             box-shadow: 0 0 24px rgba(60, 207, 192, 0.25); background: #101826; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .bigbtn { background: #f4f6f8; color: #111; border: 0; border-radius: 8px; padding: 12px 18px; font-size: 16px; font-weight: 700; cursor: pointer; }
+  .hint { color: var(--sub); font-size: 12px; }
+  .editor { display: none; margin-top: 12px; background: var(--panel); border-radius: 8px; padding: 12px; }
+  .editor.on { display: block; }
+  .editor .at { color: var(--accent); font-weight: 700; }
+  .editor .quote { font-size: 14px; margin: 4px 0; color: var(--text); }
+  .cats { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+  .cat { background: #222c3c; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
+  .cat.on { background: var(--accent); color: #062; border-color: var(--accent); font-weight: 700; }
+  textarea { width: 100%; min-height: 64px; background: #0b111b; color: var(--text); border: 1px solid var(--line);
+             border-radius: 6px; padding: 8px; font-size: 16px; font-family: inherit; }
+  button.small { background: #222c3c; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
+  button.small.primary { background: var(--accent); color: #042; border-color: var(--accent); font-weight: 700; }
+  button.small.rec { background: var(--red); border-color: var(--red); color: #fff; }
+  .list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .item { background: var(--panel); border-radius: 8px; padding: 9px 10px; }
+  .item .head { display: flex; gap: 8px; align-items: center; }
+  .item.done { opacity: 0.45; }
+  .item.done .txt { text-decoration: line-through; }
+  .item input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+  .item .tc { background: #1d3550; color: #7cc4ff; border-radius: 5px; padding: 3px 8px; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .item .cg { color: var(--sub); font-size: 12px; }
+  .item .del { margin-left: auto; background: none; border: 0; color: var(--sub); cursor: pointer; font-size: 16px; }
+  .item .quote { color: var(--sub); font-size: 12px; margin: 6px 0 2px 28px; }
+  .item .txt { font-size: 15px; line-height: 1.5; white-space: pre-wrap; margin-left: 28px; }
+  .empty { color: var(--sub); font-size: 13px; padding: 6px 2px; }
+  .out { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #222c3c; border: 1px solid var(--accent);
+           padding: 10px 16px; border-radius: 8px; font-size: 14px; display: none; }
+  @media (max-width: 860px) {
+    .cols { grid-template-columns: 1fr; padding: 0 16px; }
+    .side { position: static; height: auto; order: -1; }
+    .script { padding-bottom: 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="cols">
+  <div class="script">
+    <h1 id="title">音声チェック</h1>
+    <div class="loader" id="loader">
+      <div id="loadMsg">台本（script.txt）と音声（audio.mp3）を選んでください。このあたりにドラッグしても読み込めます。</div>
+      <label>台本 <input type="file" id="pickText" accept=".txt,text/plain" /></label>
+      <label>音声 <input type="file" id="pickAudio" accept="audio/*" /></label>
+      <div class="hint" id="loadState"></div>
+    </div>
+    <div id="text"></div>
+  </div>
+
+  <div class="side">
+    <div class="player">
+      <div class="btns">
+        <button class="pbtn" id="playBtn">▶ 再生</button>
+        <button class="pbtn" id="stopBtn">■ 停止</button>
+        <div class="now" id="now">0:00</div>
+      </div>
+      <div id="seek"><div class="track"></div><div class="fill" id="fill"></div><div class="knob" id="knob"></div></div>
+      <div class="ctrl">
+        <button id="back">−5秒</button><button id="fwd">＋5秒</button>
+        <span style="margin-left:8px">倍速</span><span id="rates"></span>
+      </div>
+      <div class="st" id="st"></div>
+      <div class="hint" style="margin-top:4px">スペース＝再生/停止　C＝コメント　←→＝5秒移動　左の文をクリック＝そこから再生</div>
+      <audio id="A" preload="auto"></audio>
+    </div>
+
+    <div class="comment">
+      <div class="row">
+        <button class="bigbtn" id="addBtn">▶ いま止めた位置にコメント</button>
+      </div>
+      <div class="editor" id="editor">
+        <div><span class="at" id="edAt"></span></div>
+        <div class="quote" id="edQuote"></div>
+        <div class="cats" id="cats"></div>
+        <textarea id="edText" placeholder="例：「楽を」が「なくを」に聞こえる"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="small primary" id="saveBtn">追加（Ctrl+Enter）</button>
+          <button class="small" id="micBtn">🎤 声で入力</button>
+          <button class="small" id="cancelBtn">やめる</button>
+          <span class="hint" id="micMsg"></span>
+        </div>
+      </div>
+      <div class="list" id="list"></div>
+      <div class="out">
+        <button class="small primary" id="exportBtn">コメントを書き出す（ファイル）</button>
+        <button class="small" id="copyBtn">コメントをコピー（チャットに貼る用）</button>
+        <span class="hint" id="count"></span>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const A = $("A");
+  const CATS = ["読み間違い", "途切れ", "間・速さ", "声の調子", "その他"];
+  let title = "音声チェック", audioName = "audio.mp3";
+  let lines = [];      // { no, para, text, t（書いてある秒。なければ null）, start（使う秒） }
+  let sentEls = [];
+  let comments = [], KEY = "";
+  const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const fmtJ = s => `${Math.floor(s / 60)}分${(s % 60).toFixed(1)}秒`;
+  const total = () => A.duration || 0;
+  const toast = msg => { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 2200); };
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(comments)); } catch (e) {} };
+
+  // ---- 読み込み ----
+  // 台本テキストを文の一覧にする（頭の「分:秒」は任意）
+  function parseScript(src) {
+    const out = []; let para = 0, no = 0, gap = false;
+    title = "音声チェック";
+    src.replace(/^﻿/, "").split(/\r?\n/).forEach((raw, i) => {
+      const s = raw.trim();
+      if (!s) { gap = true; return; }
+      if (i === 0 && s.startsWith("#")) { title = s.replace(/^#+\s*/, ""); return; }
+      if (gap && out.length) para++;
+      gap = false;
+      const m = s.match(/^(\d+):(\d+(?:\.\d+)?)\s+(.*)$/);
+      out.push({ no: no++, para, text: m ? m[3] : s, t: m ? +m[1] * 60 + +m[2] : null });
+    });
+    return out;
+  }
+  // 秒がない文は、前後の書いてある秒（なければ頭と終わり）の間を文字数で割り振る
+  function fillStarts() {
+    const end = total() || lines.reduce((a, l) => a + l.text.length, 0) / 7;
+    let i = 0;
+    while (i < lines.length) {
+      if (lines[i].t != null) { lines[i].start = lines[i].t; i++; continue; }
+      let j = i; while (j < lines.length && lines[j].t == null) j++;
+      // 前の文の頭（なければ0秒）から次の秒（なければ終わり）までを、前の文も含めた文字数で分ける
+      const from = i ? lines[i - 1].start : 0, to = j < lines.length ? lines[j].t : end;
+      const seg = lines.slice(i, j);
+      let acc = i ? lines[i - 1].text.length : 0;
+      const sum = acc + seg.reduce((s, l) => s + l.text.length, 0);
+      seg.forEach(l => { l.start = from + (to - from) * acc / sum; acc += l.text.length; });
+      i = j;
+    }
+  }
+  function setScript(src) {
+    lines = parseScript(src);
+    $("title").textContent = "音声チェック：" + title;
+    document.title = title;
+    KEY = "voice-check:" + location.pathname + ":" + title;
+    try { comments = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { comments = []; }
+    fillStarts(); drawText(); render();
+  }
+  function setAudio(url, name) { audioName = name; A.src = url; }
+
+  function showLoader(msg) { $("loader").classList.add("on"); if (msg) $("loadMsg").textContent = msg; }
+  function loadState() {
+    $("loadState").innerHTML = `台本：${lines.length ? '<span class="ok">読み込みOK（' + lines.length + '文）</span>' : "まだ"}　` +
+      `音声：${total() ? '<span class="ok">読み込みOK（' + fmt(total()) + '）</span>' : "まだ"}`;
+    if (lines.length && total()) $("loader").classList.remove("on");
+  }
+  function readFile(f) {
+    if (!f) return;
+    if (f.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg)$/i.test(f.name)) setAudio(URL.createObjectURL(f), f.name);
+    else f.text().then(t => { setScript(t); loadState(); });
+  }
+  $("pickText").onchange = e => readFile(e.target.files[0]);
+  $("pickAudio").onchange = e => readFile(e.target.files[0]);
+  ["dragover", "dragenter"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); $("loader").classList.add("drag"); }));
+  ["dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); $("loader").classList.remove("drag"); }));
+  document.addEventListener("drop", e => [...e.dataTransfer.files].forEach(readFile));
+
+  A.addEventListener("loadedmetadata", () => {
+    $("st").textContent = `読み込みOK（${fmt(A.duration)}）`; $("st").classList.remove("ng");
+    if (lines.length) { fillStarts(); render(); }
+    loadState();
+  });
+  A.addEventListener("error", () => {
+    if (!A.src.startsWith("blob:")) { $("st").textContent = "audio.mp3 が見つかりません。左から音声を選んでください"; $("st").classList.add("ng"); showLoader(); }
+  });
+
+  // 同じフォルダの script.txt と audio.mp3 を読む
+  setAudio("audio.mp3", "audio.mp3");
+  fetch("script.txt").then(r => { if (!r.ok) throw 0; return r.text(); })
+    .then(t => { setScript(t); loadState(); })
+    .catch(() => showLoader(location.protocol === "file:"
+      ? "ダブルクリックで開いたときは、台本を自動で読めません。下で script.txt を選ぶか、このあたりにドラッグしてください。"
+      : "script.txt が見つかりません。下で台本を選ぶか、このあたりにドラッグしてください。"));
+
+  // ---- 左：台本（段落ごと、句点でも改行） ----
+  const lineAt = t => { let i = 0; lines.forEach((l, k) => { if (t >= l.start) i = k; }); return i; };
+  function drawText() {
+    $("text").innerHTML = ""; sentEls = [];
+    let para = null, last = -1;
+    lines.forEach(l => {
+      if (l.para !== last) { para = document.createElement("div"); para.className = "para"; $("text").appendChild(para); last = l.para; }
+      const el = document.createElement("div"); el.className = "sent";
+      el.innerHTML = `<span class="no">${l.no + 1}</span><span class="tx"></span><span class="badge"></span>`;
+      el.querySelector(".tx").textContent = l.text.replace(/。(?!$)/g, "。\n");
+      el.onclick = () => { if (!total()) return; seekTo(l.start); play(); };
+      para.appendChild(el); sentEls.push(el);
+    });
+    curIdx = -1;
+  }
+
+  // ---- 右：プレーヤー ----
+  const play = () => A.play().catch(() => {});
+  const stop = () => A.pause();
+  const seekTo = t => { if (total()) A.currentTime = Math.max(0, Math.min(total() - 0.05, t)); };
+  $("playBtn").onclick = play; $("stopBtn").onclick = stop;
+  $("back").onclick = () => seekTo(A.currentTime - 5); $("fwd").onclick = () => seekTo(A.currentTime + 5);
+  [0.75, 1, 1.25, 1.5].forEach(r => {
+    const b = document.createElement("button"); b.textContent = r + "x"; if (r === 1) b.className = "on";
+    b.onclick = () => { A.playbackRate = r; document.querySelectorAll("#rates button").forEach(x => x.classList.toggle("on", x === b)); };
+    $("rates").appendChild(b);
+  });
+  const seek = $("seek");
+  function drawSeek() {
+    seek.querySelectorAll(".mark").forEach(e => e.remove());
+    if (!total()) return;
+    comments.forEach(c => {
+      const d = document.createElement("div"); d.className = "mark" + (c.done ? " done" : ""); d.style.left = (c.t / total() * 100) + "%";
+      d.title = fmt(c.t) + " " + c.text; seek.appendChild(d);
+    });
+  }
+  let drag = false;
+  const posT = e => { const r = seek.getBoundingClientRect(); return (e.clientX - r.left) / r.width * total(); };
+  seek.addEventListener("pointerdown", e => { drag = true; seek.setPointerCapture(e.pointerId); seekTo(posT(e)); });
+  seek.addEventListener("pointermove", e => { if (drag) seekTo(posT(e)); });
+  seek.addEventListener("pointerup", () => drag = false);
+
+  // いま読んでいる文に色を付け、再生中は見える位置まで送る
+  let curIdx = -1;
+  function tick() {
+    const t = A.currentTime, p = total() ? t / total() * 100 : 0;
+    $("now").textContent = `${fmt(t)} / ${fmt(total())}`;
+    $("fill").style.width = p + "%"; $("knob").style.left = p + "%";
+    $("playBtn").classList.toggle("on", !A.paused);
+    if (lines.length) {
+      const i = lineAt(t);
+      if (i !== curIdx) {
+        sentEls.forEach((el, k) => el.classList.toggle("cur", k === i)); curIdx = i;
+        if (!A.paused) sentEls[i].scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ---- コメント ----
+  let draftT = 0, draftCat = CATS[0];
+  CATS.forEach(c => {
+    const b = document.createElement("button"); b.className = "cat" + (c === draftCat ? " on" : ""); b.textContent = c;
+    b.onclick = () => { draftCat = c; document.querySelectorAll(".cat").forEach(x => x.classList.toggle("on", x === b)); };
+    $("cats").appendChild(b);
+  });
+  function openEditor() {
+    if (!lines.length) { toast("先に台本を読み込んでください"); return; }
+    stop(); draftT = A.currentTime;
+    const l = lines[lineAt(draftT)];
+    $("edAt").textContent = `${fmtJ(draftT)}（${l.no + 1}番の文）`;
+    $("edQuote").textContent = "「" + l.text + "」";
+    $("editor").classList.add("on"); $("edText").value = ""; $("edText").focus();
+  }
+  function closeEditor() { $("editor").classList.remove("on"); stopMic(); }
+  function addComment() {
+    const text = $("edText").value.trim();
+    if (!text) { toast("コメントが空です"); return; }
+    const l = lines[lineAt(draftT)];
+    comments.push({ t: Math.round(draftT * 10) / 10, no: l.no + 1, line: l.text, cat: draftCat, text, done: false });
+    comments.sort((a, b) => a.t - b.t); save(); render(); closeEditor(); toast("追加しました");
+  }
+  $("addBtn").onclick = openEditor;
+  $("saveBtn").onclick = addComment;
+  $("cancelBtn").onclick = closeEditor;
+  $("edText").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) addComment(); });
+
+  // 声で入力（Chrome の音声認識。使えない環境では fn 2回の Mac 音声入力を案内）
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  function stopMic() { if (rec) { rec.stop(); rec = null; } $("micBtn").classList.remove("rec"); $("micBtn").textContent = "🎤 声で入力"; }
+  $("micBtn").onclick = () => {
+    if (rec) { stopMic(); return; }
+    if (!SR) { $("micMsg").textContent = "このブラウザでは使えません。fn キーを2回押して話してください"; $("edText").focus(); return; }
+    rec = new SR(); rec.lang = "ja-JP"; rec.interimResults = true; rec.continuous = true;
+    const base = $("edText").value;
+    rec.onresult = e => { let s = ""; for (const r of e.results) s += r[0].transcript; $("edText").value = base + s; };
+    rec.onerror = e => { $("micMsg").textContent = `音声入力が使えません（${e.error}）。fn キーを2回押して話してください`; stopMic(); };
+    rec.onend = () => stopMic();
+    rec.start(); $("micBtn").classList.add("rec"); $("micBtn").textContent = "■ 話し終わったら押す"; $("micMsg").textContent = "";
+  };
+
+  function render() {
+    const list = $("list"); list.innerHTML = "";
+    if (!comments.length) list.innerHTML = '<div class="empty">まだコメントはありません。気になった所で止めて、上のボタンを押してください。</div>';
+    comments.forEach((c, i) => {
+      const el = document.createElement("div"); el.className = "item" + (c.done ? " done" : "");
+      el.innerHTML = `<div class="head"><input type="checkbox" title="直したらチェック" ${c.done ? "checked" : ""}>
+        <span class="tc">${fmtJ(c.t)}</span><span class="cg">${c.cat}・${c.no}番</span><button class="del" title="削除">✕</button></div>
+        <div class="quote"></div><div class="txt"></div>`;
+      el.querySelector(".quote").textContent = "「" + c.line + "」";
+      el.querySelector(".txt").textContent = c.text;
+      el.querySelector("input").onchange = e => { c.done = e.target.checked; save(); render(); };
+      el.querySelector(".tc").onclick = () => seekTo(c.t);
+      el.querySelector(".del").onclick = () => { if (confirmDel(c)) { comments.splice(i, 1); save(); render(); } };
+      list.appendChild(el);
+    });
+    const open = comments.filter(c => !c.done).length;
+    $("count").textContent = `コメント ${comments.length} 件（未対応 ${open} 件）`;
+    sentEls.forEach((el, k) => {
+      const n = comments.filter(c => !c.done && c.no === k + 1).length;
+      el.classList.toggle("has", n > 0);
+      el.querySelector(".badge").textContent = n ? `💬${n}` : "";
+    });
+    drawSeek();
+  }
+  // 誤操作防止：削除は2回押しで確定（ブラウザの確認ダイアログは使わない）
+  let pendingDel = null;
+  function confirmDel(c) { if (pendingDel === c) { pendingDel = null; return true; } pendingDel = c; toast("もう一度 ✕ を押すと削除します"); setTimeout(() => { if (pendingDel === c) pendingDel = null; }, 3000); return false; }
+  render();
+
+  // ---- 書き出し ----
+  const asText = () => `【音声チェック：${title}（${audioName}）へのコメント】\n` +
+    comments.map(c => `${c.done ? "[済] " : "[ ] "}${fmtJ(c.t)} ${c.no}番「${c.line}」［${c.cat}］ ${c.text}`).join("\n");
+  $("exportBtn").onclick = () => {
+    const data = { title, audio: audioName, exportedAt: new Date().toISOString(), comments };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    a.download = "voice-check.json"; a.click();
+    toast("ダウンロードフォルダに保存しました");
+  };
+  $("copyBtn").onclick = async () => {
+    try { await navigator.clipboard.writeText(asText()); toast("コピーしました。チャットに貼り付けてください"); }
+    catch (e) { const ta = document.createElement("textarea"); ta.value = asText(); document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); toast("コピーしました"); }
+  };
+
+  // キー操作（入力中は無効）
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") { if (e.key === "Escape") closeEditor(); return; }
+    if (e.code === "Space") { e.preventDefault(); A.paused ? play() : stop(); }
+    else if (e.key === "c" || e.key === "C") { e.preventDefault(); openEditor(); }
+    else if (e.key === "ArrowLeft") seekTo(A.currentTime - 5);
+    else if (e.key === "ArrowRight") seekTo(A.currentTime + 5);
+  });
+</script>
+</body>
+</html>
