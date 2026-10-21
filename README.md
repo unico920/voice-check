@@ -37,6 +37,7 @@
    ```
    python3 -m http.server 8000
    ```
+   - Windows は `py -m http.server 8000` を実行してください
 2. ブラウザで http://localhost:8000 を開きます
 3. 台本も音声も自動で読み込まれます（終わるときはターミナルで Ctrl+C）
 
