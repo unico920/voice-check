@@ -64,9 +64,9 @@
 
 clone してお使いの AI に修正してもらってください。
 
-## 作った人
+## 制作に使ったツール
 
-[Claude Code](https://claude.com/claude-code)（Anthropic の AI）で作りました。
+このツールは [Claude Code](https://claude.com/claude-code)（Anthropic の AI）を使って作りました。
 
 ## クレジット
 
